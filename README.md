@@ -93,7 +93,7 @@ public void ProcessOrder_WhenCertIsValid_ShouldSucceed()
 dotnet add package InjectorPP.Net
 ```
 
-**Requirements:** .NET 6.0+ | Windows or Linux | x64, ARM64, or x86
+**Requirements:** .NET 8.0+ | Windows or Linux | x64, ARM64, or x86
 
 ## Use Cases
 
