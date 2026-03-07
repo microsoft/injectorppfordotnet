@@ -7,7 +7,6 @@ namespace InjectorPP.Net.Tests;
 /// Tests for injection scoping - verifying that original method behavior is restored
 /// after the injector is disposed. Mirrors the C++ "Limit the scope" pattern.
 /// </summary>
-[Collection("Sequential")]
 public class ScopeTests
 {
     [Fact]

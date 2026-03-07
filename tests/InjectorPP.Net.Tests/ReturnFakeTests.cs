@@ -7,7 +7,6 @@ namespace InjectorPP.Net.Tests;
 /// Tests for faking method return values - the core feature of InjectorPP.
 /// Mirrors the C++ returnFakeUnitTest.cpp patterns.
 /// </summary>
-[Collection("Sequential")]
 public class ReturnFakeTests
 {
     [Fact]

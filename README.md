@@ -519,48 +519,14 @@ public void ProcessOrder_WhenCertIsInvalid_ShouldFail()
 | `WillExecute(MethodInfo)` | Replace the method with another method |
 | `WillDoNothing()` | Make the method return `default` for its type |
 
-## Important: Tests Must Run Sequentially
+## Thread Safety
 
-InjectorPP.Net patches methods **process-wide** at the native code level. If multiple tests run in parallel and patch the same method, they will interfere with each other. You must ensure your tests run sequentially.
+InjectorPP.Net uses **thread-local dispatch** so that each test thread gets its own method replacement. This means:
 
-### xUnit
-
-Use `[Collection]` to group all InjectorPP tests into a single sequential collection:
-
-```csharp
-// Define the collection (once per test project)
-[CollectionDefinition("Sequential")]
-public class SequentialCollection { }
-
-// Apply to every test class that uses InjectorPP
-[Collection("Sequential")]
-public class OrderServiceTests
-{
-    [Fact]
-    public void ProcessOrder_WhenCertIsValid_ShouldSucceed()
-    {
-        using var injector = new Injector();
-        injector.WhenCalled(typeof(CertValidator).GetMethod(nameof(CertValidator.VerifyCertInMachine))!)
-                .WillReturn(true);
-
-        // ...
-    }
-}
-```
-
-### NUnit
-
-```csharp
-// Disable parallelism at the assembly level
-[assembly: NonParallelizable]
-```
-
-### MSTest
-
-```csharp
-// In .runsettings or AssemblyInfo.cs
-[assembly: DoNotParallelize]
-```
+- **Parallel tests just work.** No `[Collection("Sequential")]`, no `[assembly: NonParallelizable]`, no special configuration needed.
+- Each thread's fake is fully isolated — if Thread A fakes `CertValidator.VerifyCertInMachine()` to return `true` and Thread B fakes it to return `false`, each thread sees its own value.
+- Threads without an active fake see the original method behavior.
+- Disposing an `Injector` only removes the current thread's replacements, leaving other threads unaffected.
 
 ## Platform Support
 

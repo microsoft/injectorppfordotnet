@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -5,14 +6,14 @@ using System.Runtime.InteropServices;
 namespace InjectorPP.Net;
 
 /// <summary>
-/// Core engine that handles method redirection.
+/// Core engine that handles method redirection with thread-local dispatch.
 ///
-/// On .NET Core, GetFunctionPointer() returns a precode address containing JMP [fixup_cell].
-/// Both the precode and caller call sites share the same fixup cell. By modifying the fixup cell
-/// value (a pointer swap), we redirect all calls to the replacement method.
+/// When a method is first patched on any thread, it is redirected to a dispatcher.
+/// The dispatcher looks up the current thread's replacement in ThreadLocalRegistry.
+/// If no replacement is registered for the calling thread, the original method is called.
 ///
-/// If the precode format can't be parsed (or for platforms where it differs), we fall back to
-/// patching the resolved JIT-compiled code directly.
+/// This enables parallel test execution — each thread can independently
+/// fake the same method to different values without interference.
 /// </summary>
 internal static class MethodReplacer
 {
@@ -35,52 +36,177 @@ internal static class MethodReplacer
     private const int PROT_EXEC = 4;
 
     /// <summary>
-    /// Replaces the original method by redirecting calls to the replacement method.
-    /// Uses fixup cell modification (pointer swap) when possible, falling back to
-    /// JIT code patching when the precode format is not recognized.
+    /// Tracks globally patched methods. Key is the original method handle.
+    /// This ensures each method is only patched once (to the dispatcher),
+    /// regardless of how many threads register replacements.
+    /// </summary>
+    private static readonly ConcurrentDictionary<RuntimeMethodHandle, PatchedMethodInfo> s_patchedMethods = new();
+    private static readonly object s_patchLock = new();
+
+    /// <summary>
+    /// Registers a thread-local replacement for the given method.
+    /// If this is the first replacement for this method, patches it to a dispatcher.
+    /// Returns a MethodReplacement that can be used to undo this thread's registration.
     /// </summary>
     public static MethodReplacement Replace(MethodBase original, MethodInfo replacement)
     {
         RuntimeHelpers.PrepareMethod(original.MethodHandle);
         RuntimeHelpers.PrepareMethod(replacement.MethodHandle);
 
-        IntPtr originalFuncPtr = original.MethodHandle.GetFunctionPointer();
         IntPtr replacementFuncPtr = replacement.MethodHandle.GetFunctionPointer();
+        IntPtr replacementCodeAddr = ResolveJitCodeAddress(replacementFuncPtr);
 
-        // Try fixup cell approach first (cleanest - just a pointer swap)
-        IntPtr fixupCell = FindFixupCell(originalFuncPtr);
-        if (fixupCell != IntPtr.Zero)
+        // Lock ensures atomicity of GetOrCreatePatch + AddReplacement,
+        // preventing a race where Restore removes the patch between these two steps.
+        lock (s_patchLock)
         {
-            return PatchFixupCell(original, fixupCell, replacementFuncPtr);
-        }
+            var patchedInfo = GetOrCreatePatchLocked(original);
+            ThreadLocalRegistry.AddReplacement(patchedInfo.MethodKey, replacementCodeAddr);
 
-        // Fallback: patch the JIT code directly
-        IntPtr codeAddr = ResolveJitCodeAddress(originalFuncPtr);
-        return PatchJitCode(original, codeAddr, replacementFuncPtr);
+            return new MethodReplacement
+            {
+                OriginalMethod = original,
+                MethodKey = patchedInfo.MethodKey,
+            };
+        }
     }
 
     /// <summary>
-    /// Restores the original method.
+    /// Removes the current thread's replacement for the given method.
+    /// If this was the last thread using this method's dispatch, restores the original.
     /// </summary>
     public static void Restore(MethodReplacement replacement)
     {
-        if (replacement.IsFixupCellPatch)
+        lock (s_patchLock)
         {
-            // Restore the original fixup cell value
-            MakeMemoryWritable(replacement.OriginalAddress);
-            Marshal.Copy(replacement.OriginalBytes, 0, replacement.OriginalAddress, 8);
-        }
-        else
-        {
-            // Restore the original JIT code bytes
-            MakeMemoryWritable(replacement.OriginalAddress);
-            Marshal.Copy(replacement.OriginalBytes, 0, replacement.OriginalAddress, replacement.PatchSize);
-            FlushCache(replacement.OriginalAddress, replacement.PatchSize);
+            bool isLast = ThreadLocalRegistry.RemoveReplacement(replacement.MethodKey);
+
+            if (isLast)
+            {
+                if (s_patchedMethods.TryRemove(replacement.OriginalMethod.MethodHandle, out var patchedInfo))
+                {
+                    RestoreOriginalBytes(patchedInfo);
+                    ThreadLocalRegistry.RemoveMethod(replacement.MethodKey);
+                }
+            }
         }
     }
 
     /// <summary>
-    /// Finds the fixup cell address from an x64 precode (JMP [RIP+disp32]).
+    /// Gets or creates a patch entry for the given method.
+    /// Must be called while holding s_patchLock.
+    /// </summary>
+    private static PatchedMethodInfo GetOrCreatePatchLocked(MethodBase original)
+    {
+        if (s_patchedMethods.TryGetValue(original.MethodHandle, out var existing))
+            return existing;
+
+        IntPtr originalFuncPtr = original.MethodHandle.GetFunctionPointer();
+
+        // Determine original function pointer for "call original" path
+        IntPtr originalCodeAddr;
+        IntPtr trampolineAddr = IntPtr.Zero;
+        bool isFixupCell;
+
+        IntPtr fixupCell = FindFixupCell(originalFuncPtr);
+        if (fixupCell != IntPtr.Zero)
+        {
+            // Fixup cell path: original code is untouched, read its address from the cell
+            byte[] cellBytes = new byte[8];
+            Marshal.Copy(fixupCell, cellBytes, 0, 8);
+            originalCodeAddr = new IntPtr(BitConverter.ToInt64(cellBytes, 0));
+            isFixupCell = true;
+        }
+        else
+        {
+            // JIT code patching path: need a trampoline since we'll overwrite the code
+            IntPtr codeAddr = ResolveJitCodeAddress(originalFuncPtr);
+            int patchSize = GetPatchSize();
+            trampolineAddr = TrampolineAllocator.CreateTrampoline(codeAddr, patchSize);
+            originalCodeAddr = trampolineAddr;
+            isFixupCell = false;
+        }
+
+        // Register the method in ThreadLocalRegistry with its original function pointer
+        int methodKey = ThreadLocalRegistry.RegisterMethod(originalCodeAddr);
+
+        // Generate the dispatcher
+        var dispatcherMethod = DispatcherGenerator.GenerateDispatcher((MethodInfo)original, methodKey);
+        RuntimeHelpers.PrepareMethod(dispatcherMethod.MethodHandle);
+        IntPtr dispatcherFuncPtr = dispatcherMethod.MethodHandle.GetFunctionPointer();
+        IntPtr dispatcherCodeAddr = ResolveJitCodeAddress(dispatcherFuncPtr);
+
+        // Patch the original to redirect to the dispatcher
+        byte[] savedBytes;
+        IntPtr patchAddress;
+        int patchedSize;
+
+        if (isFixupCell)
+        {
+            // Fixup cell: swap pointer to dispatcher's function pointer
+            MakeMemoryWritable(fixupCell);
+            savedBytes = new byte[8];
+            Marshal.Copy(fixupCell, savedBytes, 0, 8);
+            byte[] newValue = BitConverter.GetBytes(dispatcherFuncPtr.ToInt64());
+            Marshal.Copy(newValue, 0, fixupCell, 8);
+            patchAddress = fixupCell;
+            patchedSize = 8;
+        }
+        else
+        {
+            // JIT code: write JMP trampoline to dispatcher
+            IntPtr codeAddr = ResolveJitCodeAddress(originalFuncPtr);
+            MakeMemoryWritable(codeAddr);
+            byte[] jmpBytes = GenerateJmpTrampoline(dispatcherCodeAddr);
+            savedBytes = new byte[jmpBytes.Length];
+            Marshal.Copy(codeAddr, savedBytes, 0, jmpBytes.Length);
+            Marshal.Copy(jmpBytes, 0, codeAddr, jmpBytes.Length);
+            FlushCache(codeAddr, jmpBytes.Length);
+            patchAddress = codeAddr;
+            patchedSize = jmpBytes.Length;
+        }
+
+        var info = new PatchedMethodInfo
+        {
+            MethodKey = methodKey,
+            PatchAddress = patchAddress,
+            SavedBytes = savedBytes,
+            PatchSize = patchedSize,
+            IsFixupCellPatch = isFixupCell,
+            TrampolineAddress = trampolineAddr,
+        };
+
+        s_patchedMethods[original.MethodHandle] = info;
+        return info;
+    }
+
+    private static void RestoreOriginalBytes(PatchedMethodInfo info)
+    {
+        MakeMemoryWritable(info.PatchAddress);
+        Marshal.Copy(info.SavedBytes, 0, info.PatchAddress, info.PatchSize);
+
+        if (!info.IsFixupCellPatch)
+        {
+            FlushCache(info.PatchAddress, info.PatchSize);
+        }
+
+        if (info.TrampolineAddress != IntPtr.Zero)
+        {
+            TrampolineAllocator.FreeTrampoline(info.TrampolineAddress);
+        }
+    }
+
+    private static int GetPatchSize()
+    {
+        var arch = RuntimeInformation.ProcessArchitecture;
+        if (arch == Architecture.X64) return 12;
+        if (arch == Architecture.Arm64) return 20;
+        if (arch == Architecture.X86) return 6;
+        throw new PlatformNotSupportedException($"Architecture {arch} is not supported.");
+    }
+
+    /// <summary>
+    /// Finds the fixup cell address from a precode.
     /// Returns IntPtr.Zero if the precode format is not recognized.
     /// </summary>
     private static IntPtr FindFixupCell(IntPtr funcPtr)
@@ -94,14 +220,12 @@ internal static class MethodReplacer
 
             if (header[0] == 0xFF && header[1] == 0x25)
             {
-                // JMP [RIP+disp32] - the fixup cell is at RIP + 6 + disp32
                 int disp = BitConverter.ToInt32(header, 2);
                 return new IntPtr(funcPtr.ToInt64() + 6 + disp);
             }
         }
         else if (arch == Architecture.Arm64)
         {
-            // ARM64 precodes use ADRP+LDR+BR pattern
             byte[] precodeBytes = new byte[12];
             Marshal.Copy(funcPtr, precodeBytes, 0, 12);
 
@@ -109,10 +233,9 @@ internal static class MethodReplacer
             uint instr2 = BitConverter.ToUInt32(precodeBytes, 4);
             uint instr3 = BitConverter.ToUInt32(precodeBytes, 8);
 
-            // Check for ADRP + LDR + BR Xn pattern
-            if ((instr1 & 0x9F000000) == 0x90000000 &&  // ADRP
-                (instr2 & 0xFFC00000) == 0xF9400000 &&  // LDR (unsigned offset)
-                (instr3 & 0xFFFFFC00) == 0xD61F0000)    // BR
+            if ((instr1 & 0x9F000000) == 0x90000000 &&
+                (instr2 & 0xFFC00000) == 0xF9400000 &&
+                (instr3 & 0xFFFFFC00) == 0xD61F0000)
             {
                 uint immlo = (instr1 >> 29) & 0x3;
                 uint immhi = (instr1 >> 5) & 0x7FFFF;
@@ -131,61 +254,6 @@ internal static class MethodReplacer
         }
 
         return IntPtr.Zero;
-    }
-
-    /// <summary>
-    /// Patches the fixup cell to redirect the method to the replacement's entry point.
-    /// This is a simple pointer swap in a data section - no code modification needed.
-    /// </summary>
-    private static MethodReplacement PatchFixupCell(MethodBase original, IntPtr fixupCell, IntPtr replacementFuncPtr)
-    {
-        MakeMemoryWritable(fixupCell);
-
-        // Save the original cell value (JIT code address)
-        byte[] originalCellValue = new byte[8];
-        Marshal.Copy(fixupCell, originalCellValue, 0, 8);
-
-        // Write the replacement's function pointer to the fixup cell
-        byte[] newCellValue = BitConverter.GetBytes(replacementFuncPtr.ToInt64());
-        Marshal.Copy(newCellValue, 0, fixupCell, 8);
-
-        return new MethodReplacement
-        {
-            OriginalMethod = original,
-            OriginalBytes = originalCellValue,
-            OriginalAddress = fixupCell,
-            PatchSize = 8,
-            IsFixupCellPatch = true
-        };
-    }
-
-    /// <summary>
-    /// Patches the JIT-compiled code with a JMP trampoline. Used as fallback when
-    /// fixup cell approach is not available.
-    /// </summary>
-    private static MethodReplacement PatchJitCode(MethodBase original, IntPtr codeAddr, IntPtr replacementFuncPtr)
-    {
-        // Resolve the replacement's actual code address too
-        IntPtr replacementCodeAddr = ResolveJitCodeAddress(replacementFuncPtr);
-
-        MakeMemoryWritable(codeAddr);
-
-        byte[] jmpBytes = GenerateJmpTrampoline(replacementCodeAddr);
-
-        byte[] originalBytes = new byte[jmpBytes.Length];
-        Marshal.Copy(codeAddr, originalBytes, 0, jmpBytes.Length);
-
-        Marshal.Copy(jmpBytes, 0, codeAddr, jmpBytes.Length);
-        FlushCache(codeAddr, jmpBytes.Length);
-
-        return new MethodReplacement
-        {
-            OriginalMethod = original,
-            OriginalBytes = originalBytes,
-            OriginalAddress = codeAddr,
-            PatchSize = jmpBytes.Length,
-            IsFixupCellPatch = false
-        };
     }
 
     /// <summary>
@@ -268,22 +336,16 @@ internal static class MethodReplacer
         {
             byte[] jmp = new byte[20];
             long addr = target.ToInt64();
-
             uint movz = 0xD2800009u | ((uint)(addr & 0xFFFF) << 5);
             BitConverter.GetBytes(movz).CopyTo(jmp, 0);
-
             uint movk1 = 0xF2A00009u | ((uint)((addr >> 16) & 0xFFFF) << 5);
             BitConverter.GetBytes(movk1).CopyTo(jmp, 4);
-
             uint movk2 = 0xF2C00009u | ((uint)((addr >> 32) & 0xFFFF) << 5);
             BitConverter.GetBytes(movk2).CopyTo(jmp, 8);
-
             uint movk3 = 0xF2E00009u | ((uint)((addr >> 48) & 0xFFFF) << 5);
             BitConverter.GetBytes(movk3).CopyTo(jmp, 12);
-
             uint br = 0xD61F0120u;
             BitConverter.GetBytes(br).CopyTo(jmp, 16);
-
             return jmp;
         }
         else if (arch == Architecture.X86)
@@ -294,22 +356,30 @@ internal static class MethodReplacer
             jmp[5] = 0xC3;
             return jmp;
         }
-        else
-        {
-            throw new PlatformNotSupportedException(
-                $"Architecture {arch} is not supported by InjectorPP.Net.");
-        }
+
+        throw new PlatformNotSupportedException(
+            $"Architecture {arch} is not supported by InjectorPP.Net.");
     }
 }
 
 /// <summary>
-/// Stores information needed to restore an original method after injection.
+/// Tracks a globally-patched method's state.
+/// </summary>
+internal class PatchedMethodInfo
+{
+    public int MethodKey { get; init; }
+    public IntPtr PatchAddress { get; init; }
+    public byte[] SavedBytes { get; init; } = null!;
+    public int PatchSize { get; init; }
+    public bool IsFixupCellPatch { get; init; }
+    public IntPtr TrampolineAddress { get; init; }
+}
+
+/// <summary>
+/// Stores information needed to undo a single thread's method replacement.
 /// </summary>
 internal sealed class MethodReplacement
 {
     public MethodBase OriginalMethod { get; init; } = null!;
-    public byte[] OriginalBytes { get; init; } = null!;
-    public IntPtr OriginalAddress { get; init; }
-    public int PatchSize { get; init; }
-    public bool IsFixupCellPatch { get; init; }
+    public int MethodKey { get; init; }
 }

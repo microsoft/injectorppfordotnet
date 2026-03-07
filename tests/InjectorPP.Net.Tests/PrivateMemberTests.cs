@@ -7,7 +7,6 @@ namespace InjectorPP.Net.Tests;
 /// Tests for accessing and faking non-public (private/protected) members.
 /// In C#, reflection makes this much simpler than the C++ accessor macro approach.
 /// </summary>
-[Collection("Sequential")]
 public class PrivateMemberTests
 {
     [Fact]
