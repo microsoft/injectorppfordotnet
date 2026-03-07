@@ -100,7 +100,8 @@ public sealed class Injector : IDisposable
     /// </summary>
     internal void RegisterReplacement(MethodInfo originalMethod, MethodInfo replacementMethod)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_disposed)
+            throw new ObjectDisposedException(GetType().FullName);
 
         var replacement = MethodReplacer.Replace(originalMethod, replacementMethod);
         _replacements.Add(replacement);
