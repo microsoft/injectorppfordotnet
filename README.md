@@ -519,6 +519,49 @@ public void ProcessOrder_WhenCertIsInvalid_ShouldFail()
 | `WillExecute(MethodInfo)` | Replace the method with another method |
 | `WillDoNothing()` | Make the method return `default` for its type |
 
+## Important: Tests Must Run Sequentially
+
+InjectorPP.Net patches methods **process-wide** at the native code level. If multiple tests run in parallel and patch the same method, they will interfere with each other. You must ensure your tests run sequentially.
+
+### xUnit
+
+Use `[Collection]` to group all InjectorPP tests into a single sequential collection:
+
+```csharp
+// Define the collection (once per test project)
+[CollectionDefinition("Sequential")]
+public class SequentialCollection { }
+
+// Apply to every test class that uses InjectorPP
+[Collection("Sequential")]
+public class OrderServiceTests
+{
+    [Fact]
+    public void ProcessOrder_WhenCertIsValid_ShouldSucceed()
+    {
+        using var injector = new Injector();
+        injector.WhenCalled(typeof(CertValidator).GetMethod(nameof(CertValidator.VerifyCertInMachine))!)
+                .WillReturn(true);
+
+        // ...
+    }
+}
+```
+
+### NUnit
+
+```csharp
+// Disable parallelism at the assembly level
+[assembly: NonParallelizable]
+```
+
+### MSTest
+
+```csharp
+// In .runsettings or AssemblyInfo.cs
+[assembly: DoNotParallelize]
+```
+
 ## Platform Support
 
 | Platform | Architecture | Status |
