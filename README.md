@@ -61,17 +61,7 @@ The production code got *worse* to support the tests. That's backwards.
 InjectorPP.Net takes a completely different approach. Instead of restructuring your code around dependency injection, it **replaces method behavior at runtime** — so your production code stays exactly as it was:
 
 ```csharp
-// Production code: clean, simple, no interfaces, no DI
-public static class CertValidator
-{
-    public static bool VerifyCertInMachine()
-    {
-        // Real implementation that talks to the OS certificate store
-        return false;
-    }
-}
-
-// Test code: just tell InjectorPP what you want methods to return
+// Test code: just fake the dependency and test ProcessOrder directly
 [Fact]
 public void ProcessOrder_WhenCertIsValid_ShouldSucceed()
 {
@@ -79,9 +69,10 @@ public void ProcessOrder_WhenCertIsValid_ShouldSucceed()
     injector.WhenCalled(typeof(CertValidator).GetMethod(nameof(CertValidator.VerifyCertInMachine))!)
             .WillReturn(true);
 
-    int result = CertValidator.MarkProcessValidated(true);
+    var service = new OrderService();
+    bool result = service.ProcessOrder(order);
 
-    Assert.Equal(0, result);  // Success path tested without a real certificate
+    Assert.True(result);  // Success path tested without a real certificate
 }
 ```
 
@@ -459,47 +450,43 @@ Assert.Throws<ObjectDisposedException>(() =>
 Here's the scenario InjectorPP.Net was built for. Your production code calls an OS-level API that's impossible to mock with interfaces:
 
 ```csharp
-public static class CertValidator
+public class OrderService
 {
-    public static bool VerifyCertInMachine()
+    public bool ProcessOrder(Order order)
     {
-        // Talks to the Windows certificate store — can't be faked with DI
-        return Win32.CertVerify(...);
-    }
+        // Calls a static method that talks to the OS certificate store — can't be faked with DI
+        bool isValid = CertValidator.VerifyCertInMachine();
+        if (!isValid) return false;
 
-    public static int MarkProcessValidated(bool processExists)
-    {
-        if (!processExists) return -1;
-
-        bool isSuccess = VerifyCertInMachine();
-        if (!isSuccess) return -2;
-
-        return 0;
+        PaymentGateway.Charge(order.Amount);
+        return true;
     }
 }
 ```
 
-With InjectorPP.Net, you test both paths without touching the production code:
+With InjectorPP.Net, you test both paths by faking `VerifyCertInMachine` — without touching the production code:
 
 ```csharp
 [Fact]
-public void MarkProcessValidated_WhenCertIsValid_ReturnsSuccess()
+public void ProcessOrder_WhenCertIsValid_ShouldSucceed()
 {
     using var injector = new Injector();
     injector.WhenCalled(typeof(CertValidator).GetMethod(nameof(CertValidator.VerifyCertInMachine))!)
             .WillReturn(true);
 
-    Assert.Equal(0, CertValidator.MarkProcessValidated(true));
+    var service = new OrderService();
+    Assert.True(service.ProcessOrder(order));
 }
 
 [Fact]
-public void MarkProcessValidated_WhenCertIsInvalid_ReturnsError()
+public void ProcessOrder_WhenCertIsInvalid_ShouldFail()
 {
     using var injector = new Injector();
     injector.WhenCalled(typeof(CertValidator).GetMethod(nameof(CertValidator.VerifyCertInMachine))!)
             .WillReturn(false);
 
-    Assert.Equal(-2, CertValidator.MarkProcessValidated(true));
+    var service = new OrderService();
+    Assert.False(service.ProcessOrder(order));
 }
 ```
 
