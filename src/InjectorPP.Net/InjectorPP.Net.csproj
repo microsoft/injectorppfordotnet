@@ -7,6 +7,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>InjectorPP.Net</RootNamespace>
     <AssemblyName>InjectorPP.Net</AssemblyName>
+
+    <!-- NuGet package metadata -->
+    <PackageId>InjectorPP.Net</PackageId>
+    <Description>Runtime method replacement library for C#. Unit test any code without interfaces, dependency injection, or code changes.</Description>
+    <PackageTags>testing;mocking;unit-testing;method-replacement;runtime-patching</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/microsoft/injectorppfordotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
 </Project>
