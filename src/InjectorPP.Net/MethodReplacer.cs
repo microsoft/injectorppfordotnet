@@ -233,6 +233,7 @@ internal static class MethodReplacer
             uint instr2 = BitConverter.ToUInt32(precodeBytes, 4);
             uint instr3 = BitConverter.ToUInt32(precodeBytes, 8);
 
+            // Pattern 1: ADRP + LDR [Xn, #imm] + BR (far target)
             if ((instr1 & 0x9F000000) == 0x90000000 &&
                 (instr2 & 0xFFC00000) == 0xF9400000 &&
                 (instr3 & 0xFFFFFC00) == 0xD61F0000)
@@ -250,6 +251,44 @@ internal static class MethodReplacer
                 long ldrOffset = (long)imm12 * 8;
 
                 return new IntPtr(targetPage + ldrOffset);
+            }
+
+            // Pattern 2: LDR Xt, #label + BR Xt (FixupPrecode — near literal load)
+            // LDR (literal) 64-bit: opc=01 011 0 00 imm19 Rt → (instr & 0xFF000000) == 0x58000000
+            // BR Xn: 1101011 0000 11111 000000 Rn 00000 → (instr & 0xFFFFFC1F) == 0xD61F0000
+            if ((instr1 & 0xFF000000) == 0x58000000 &&
+                (instr2 & 0xFFFFFC1F) == 0xD61F0000)
+            {
+                uint rt = instr1 & 0x1F;
+                uint rn = (instr2 >> 5) & 0x1F;
+                if (rt == rn)
+                {
+                    int imm19 = (int)((instr1 >> 5) & 0x7FFFF);
+                    if ((imm19 & 0x40000) != 0)
+                        imm19 |= unchecked((int)0xFFF80000); // sign-extend
+                    long offset = (long)imm19 * 4;
+                    return new IntPtr(funcPtr.ToInt64() + offset);
+                }
+            }
+
+            // Pattern 3: LDR Xt1, #label1 + LDR Xt2, #label2 + BR Xt2 (StubPrecode)
+            // Two LDR literals followed by BR through the second one's register
+            if ((instr1 & 0xFF000000) == 0x58000000 &&
+                (instr2 & 0xFF000000) == 0x58000000 &&
+                (instr3 & 0xFFFFFC1F) == 0xD61F0000)
+            {
+                uint rt2 = instr2 & 0x1F;
+                uint rn = (instr3 >> 5) & 0x1F;
+                if (rt2 == rn)
+                {
+                    // The target cell is pointed to by the second LDR (the one BR uses)
+                    int imm19 = (int)((instr2 >> 5) & 0x7FFFF);
+                    if ((imm19 & 0x40000) != 0)
+                        imm19 |= unchecked((int)0xFFF80000);
+                    long offset = (long)imm19 * 4;
+                    // PC is the address of instr2, which is funcPtr + 4
+                    return new IntPtr(funcPtr.ToInt64() + 4 + offset);
+                }
             }
         }
 
@@ -281,6 +320,77 @@ internal static class MethodReplacer
             {
                 int disp = BitConverter.ToInt32(header, 1);
                 return new IntPtr(funcPtr.ToInt64() + 5 + disp);
+            }
+        }
+        else if (arch == Architecture.Arm64)
+        {
+            byte[] precodeBytes = new byte[12];
+            Marshal.Copy(funcPtr, precodeBytes, 0, 12);
+
+            uint instr1 = BitConverter.ToUInt32(precodeBytes, 0);
+            uint instr2 = BitConverter.ToUInt32(precodeBytes, 4);
+            uint instr3 = BitConverter.ToUInt32(precodeBytes, 8);
+
+            // LDR Xt, #label + BR Xt (FixupPrecode)
+            if ((instr1 & 0xFF000000) == 0x58000000 &&
+                (instr2 & 0xFFFFFC1F) == 0xD61F0000)
+            {
+                uint rt = instr1 & 0x1F;
+                uint rn = (instr2 >> 5) & 0x1F;
+                if (rt == rn)
+                {
+                    int imm19 = (int)((instr1 >> 5) & 0x7FFFF);
+                    if ((imm19 & 0x40000) != 0)
+                        imm19 |= unchecked((int)0xFFF80000);
+                    long offset = (long)imm19 * 4;
+                    IntPtr cell = new IntPtr(funcPtr.ToInt64() + offset);
+                    byte[] targetBytes = new byte[8];
+                    Marshal.Copy(cell, targetBytes, 0, 8);
+                    return new IntPtr(BitConverter.ToInt64(targetBytes, 0));
+                }
+            }
+
+            // LDR + LDR + BR (StubPrecode) — follow the second LDR's target
+            if ((instr1 & 0xFF000000) == 0x58000000 &&
+                (instr2 & 0xFF000000) == 0x58000000 &&
+                (instr3 & 0xFFFFFC1F) == 0xD61F0000)
+            {
+                uint rt2 = instr2 & 0x1F;
+                uint rn = (instr3 >> 5) & 0x1F;
+                if (rt2 == rn)
+                {
+                    int imm19 = (int)((instr2 >> 5) & 0x7FFFF);
+                    if ((imm19 & 0x40000) != 0)
+                        imm19 |= unchecked((int)0xFFF80000);
+                    long offset = (long)imm19 * 4;
+                    IntPtr cell = new IntPtr(funcPtr.ToInt64() + 4 + offset);
+                    byte[] targetBytes = new byte[8];
+                    Marshal.Copy(cell, targetBytes, 0, 8);
+                    return new IntPtr(BitConverter.ToInt64(targetBytes, 0));
+                }
+            }
+
+            // ADRP + LDR + BR — follow the loaded value
+            if ((instr1 & 0x9F000000) == 0x90000000 &&
+                (instr2 & 0xFFC00000) == 0xF9400000 &&
+                (instr3 & 0xFFFFFC00) == 0xD61F0000)
+            {
+                uint immlo = (instr1 >> 29) & 0x3;
+                uint immhi = (instr1 >> 5) & 0x7FFFF;
+                long pageOffset = (long)((immhi << 2) | immlo) << 12;
+                if ((pageOffset & 0x100000000L) != 0)
+                    pageOffset |= unchecked((long)0xFFFFFFFF00000000L);
+
+                long basePage = funcPtr.ToInt64() & ~0xFFFL;
+                long targetPage = basePage + pageOffset;
+
+                uint imm12 = (instr2 >> 10) & 0xFFF;
+                long ldrOffset = (long)imm12 * 8;
+
+                IntPtr cell = new IntPtr(targetPage + ldrOffset);
+                byte[] targetBytes = new byte[8];
+                Marshal.Copy(cell, targetBytes, 0, 8);
+                return new IntPtr(BitConverter.ToInt64(targetBytes, 0));
             }
         }
 
