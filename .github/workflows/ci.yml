@@ -11,15 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            name: linux-x64
-          - os: windows-latest
-            name: windows-x64
-          - os: ubuntu-24.04-arm
-            name: linux-arm64
-          - os: windows-arm64
-            name: windows-arm64
+        os: [ubuntu-latest, windows-latest, ubuntu-24.04-arm]
 
     runs-on: ${{ matrix.os }}
 
@@ -44,5 +36,5 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results-${{ matrix.name }}
+          name: test-results-${{ matrix.os }}
           path: '**/test-results.trx'
