@@ -61,18 +61,20 @@ The production code got *worse* to support the tests. That's backwards.
 InjectorPP.Net takes a completely different approach. Instead of restructuring your code around dependency injection, it **replaces method behavior at runtime** — so your production code stays exactly as it was:
 
 ```csharp
-// Test code: just fake the dependency and test ProcessOrder directly
+// Test code: just fake the dependencies and test ProcessOrder directly
 [Fact]
 public void ProcessOrder_WhenCertIsValid_ShouldSucceed()
 {
     using var injector = new Injector();
     injector.WhenCalled(typeof(CertValidator).GetMethod(nameof(CertValidator.VerifyCertInMachine))!)
             .WillReturn(true);
+    injector.WhenCalled(typeof(PaymentGateway).GetMethod(nameof(PaymentGateway.Charge))!)
+            .WillDoNothing();
 
     var service = new OrderService();
     bool result = service.ProcessOrder(order);
 
-    Assert.True(result);  // Success path tested without a real certificate
+    Assert.True(result);  // Success path tested without real certificate or payment
 }
 ```
 
@@ -464,7 +466,7 @@ public class OrderService
 }
 ```
 
-With InjectorPP.Net, you test both paths by faking `VerifyCertInMachine` — without touching the production code:
+With InjectorPP.Net, you test both paths by faking the dependencies — without touching the production code:
 
 ```csharp
 [Fact]
@@ -473,6 +475,8 @@ public void ProcessOrder_WhenCertIsValid_ShouldSucceed()
     using var injector = new Injector();
     injector.WhenCalled(typeof(CertValidator).GetMethod(nameof(CertValidator.VerifyCertInMachine))!)
             .WillReturn(true);
+    injector.WhenCalled(typeof(PaymentGateway).GetMethod(nameof(PaymentGateway.Charge))!)
+            .WillDoNothing();
 
     var service = new OrderService();
     Assert.True(service.ProcessOrder(order));
@@ -486,7 +490,7 @@ public void ProcessOrder_WhenCertIsInvalid_ShouldFail()
             .WillReturn(false);
 
     var service = new OrderService();
-    Assert.False(service.ProcessOrder(order));
+    Assert.False(service.ProcessOrder(order));  // PaymentGateway.Charge is never reached
 }
 ```
 
