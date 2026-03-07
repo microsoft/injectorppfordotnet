@@ -240,6 +240,39 @@ public class FooClassForExecuteTest
     }
 }
 
+// Target classes for thread safety tests — isolated from other test targets
+// to ensure clean, independent thread-safety verification.
+
+public static class ThreadSafeTarget
+{
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int GetValue() => -1;
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static string GetName() => "Original";
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static bool IsEnabled() => false;
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static void DoSomething() { }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int GetOtherValue() => -2;
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static string GetDescription() => "Default";
+}
+
+public class ThreadSafeInstanceTarget
+{
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public int GetValue() => -1;
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public string GetName() => "InstanceOriginal";
+}
+
 public class PropertyClass
 {
     private string _name = "OriginalName";

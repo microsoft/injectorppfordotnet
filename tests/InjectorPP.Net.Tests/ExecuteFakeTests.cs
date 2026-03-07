@@ -6,7 +6,6 @@ namespace InjectorPP.Net.Tests;
 /// <summary>
 /// Tests for replacing methods with custom functions - mirrors the C++ executeFakeUnitTest.cpp.
 /// </summary>
-[Collection("Sequential")]
 public class ExecuteFakeTests
 {
     [Fact]
