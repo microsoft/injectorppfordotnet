@@ -307,9 +307,9 @@ internal static class MethodReplacer
 /// </summary>
 internal sealed class MethodReplacement
 {
-    public required MethodBase OriginalMethod { get; init; }
-    public required byte[] OriginalBytes { get; init; }
-    public required IntPtr OriginalAddress { get; init; }
-    public required int PatchSize { get; init; }
+    public MethodBase OriginalMethod { get; init; } = null!;
+    public byte[] OriginalBytes { get; init; } = null!;
+    public IntPtr OriginalAddress { get; init; }
+    public int PatchSize { get; init; }
     public bool IsFixupCellPatch { get; init; }
 }
