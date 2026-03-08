@@ -10,7 +10,7 @@
 
     <!-- NuGet package metadata -->
     <PackageId>InjectorPP.Net</PackageId>
-    <Description>Runtime method replacement library for C#. Unit test any code without interfaces, dependency injection, or code changes.</Description>
+    <Description>Unit test any code without interfaces, dependency injection, or code changes.</Description>
     <PackageTags>testing;mocking;unit-testing;method-replacement;runtime-patching</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
