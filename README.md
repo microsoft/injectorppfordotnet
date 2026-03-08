@@ -1,5 +1,10 @@
 # InjectorPP.Net
 
+[![CI](https://github.com/microsoft/injectorppfordotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/microsoft/injectorppfordotnet/actions/workflows/ci.yml)
+[![Release](https://github.com/microsoft/injectorppfordotnet/actions/workflows/release.yml/badge.svg)](https://github.com/microsoft/injectorppfordotnet/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%209.0-blue)](https://dotnet.microsoft.com/)
+
 **Stop writing interfaces just to make your code testable.** InjectorPP.Net is a runtime method replacement library for C# that lets you unit test any code — without changing it.
 
 ## The Problem
