@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (e.g., 1.0.0)'
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            # Strip 'v' prefix from tag (e.g., v1.0.0 -> 1.0.0)
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release -p:Version=${{ steps.version.outputs.VERSION }}
+
+      - name: Test
+        run: dotnet test --no-build --configuration Release
+
+      - name: Pack
+        run: dotnet pack src/InjectorPP.Net/InjectorPP.Net.csproj --no-build --configuration Release -p:PackageVersion=${{ steps.version.outputs.VERSION }} --output ./artifacts
+
+      - name: Upload NuGet package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: ./artifacts/*.nupkg
+
+      - name: Push to Azure DevOps Artifacts
+        if: env.AZURE_DEVOPS_FEED_URL != ''
+        env:
+          AZURE_DEVOPS_FEED_URL: ${{ secrets.AZURE_DEVOPS_FEED_URL }}
+          AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
+        run: |
+          dotnet nuget add source "$AZURE_DEVOPS_FEED_URL" \
+            --name "AzureDevOps" \
+            --username "az" \
+            --password "$AZURE_DEVOPS_PAT" \
+            --store-password-in-clear-text
+          dotnet nuget push ./artifacts/*.nupkg \
+            --source "AzureDevOps" \
+            --api-key "az"
