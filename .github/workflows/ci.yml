@@ -5,9 +5,16 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: read
 
 jobs:
   build-and-test:
+    if: github.event_name != 'pull_request_review' || github.event.pull_request.base.ref == 'main'
     strategy:
       fail-fast: false
       matrix:
@@ -25,6 +32,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -39,6 +48,62 @@ jobs:
 
       - name: Test
         run: dotnet test --no-build --configuration Release --logger "trx;LogFileName=test-results.trx" -- RunConfiguration.TreatNoTestsAsError=true
+
+      - name: Enforce PR approval policy
+        if: github.event_name != 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const bypassUser = 'mazong1123';
+            const pr = context.payload.pull_request;
+
+            if (!pr) {
+              core.info('No pull request in event payload; skipping approval enforcement.');
+              return;
+            }
+
+            if (pr.draft) {
+              core.info(`PR #${pr.number} is a draft; skipping approval enforcement.`);
+              return;
+            }
+
+            if (pr.user.login === bypassUser) {
+              core.info(`PR author ${pr.user.login} can bypass the approval requirement.`);
+              return;
+            }
+
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100
+            });
+
+            const latestReviewByUser = new Map();
+            for (const review of reviews) {
+              if (!review.user?.login) {
+                continue;
+              }
+
+              latestReviewByUser.set(review.user.login, review);
+            }
+
+            const qualifyingApprovals = [...latestReviewByUser.values()].filter(review =>
+              review.state === 'APPROVED' &&
+              review.user.login !== pr.user.login &&
+              review.commit_id === pr.head.sha
+            );
+
+            if (qualifyingApprovals.length === 0) {
+              core.setFailed(
+                `PR #${pr.number} requires at least one non-author approval on the current head commit ${pr.head.sha}.`
+              );
+              return;
+            }
+
+            core.info(
+              `Found qualifying approval(s) from: ${qualifyingApprovals.map(review => review.user.login).join(', ')}`
+            );
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
