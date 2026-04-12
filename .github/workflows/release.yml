@@ -65,6 +65,15 @@ jobs:
           name: nuget-package
           path: ./artifacts/*.nupkg
 
+      - name: Push to NuGet.org
+        if: env.NUGET_API_KEY != ''
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push ./artifacts/*.nupkg \
+            --source "https://api.nuget.org/v3/index.json" \
+            --api-key "$NUGET_API_KEY"
+
       - name: Push to Azure DevOps Artifacts
         if: env.AZURE_DEVOPS_FEED_URL != ''
         env:
