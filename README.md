@@ -543,6 +543,10 @@ InjectorPP.Net uses **thread-local dispatch** so that each test thread gets its 
 | Linux | x64 | ✅ |
 | Linux | ARM64 | ✅ |
 
-## License
+## Contributing
 
-[MIT](LICENSE)
+This project welcomes contributions and suggestions. Please see the [CONTRIBUTING.md](/microsoft/injectorppfordotnet/blob/main/CONTRIBUTING.md)
+
+## Trademarks
+
+This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/legal/intellectualproperty/trademarks/usage/general). Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or logos are subject to those third-party's policies.
