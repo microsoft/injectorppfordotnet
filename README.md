@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/microsoft/injectorppfordotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/microsoft/injectorppfordotnet/actions/workflows/ci.yml)
 [![Release](https://github.com/microsoft/injectorppfordotnet/actions/workflows/release.yml/badge.svg)](https://github.com/microsoft/injectorppfordotnet/actions/workflows/release.yml)
+[![NuGet](https://img.shields.io/nuget/v/InjectorPP.Net.svg)](https://www.nuget.org/packages/InjectorPP.Net/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%209.0-blue)](https://dotnet.microsoft.com/)
 
