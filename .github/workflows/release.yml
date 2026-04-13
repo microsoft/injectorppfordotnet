@@ -49,6 +49,10 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release
 
+      - name: Test examples
+        shell: pwsh
+        run: .\examples\Run-ExampleTests.ps1
+
       - name: Pack
         run: dotnet pack src/InjectorPP.Net/InjectorPP.Net.csproj --no-build --configuration Release -p:PackageVersion=${{ steps.version.outputs.VERSION }} --output ./artifacts
 

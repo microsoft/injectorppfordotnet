@@ -49,6 +49,10 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release --logger "trx;LogFileName=test-results.trx" -- RunConfiguration.TreatNoTestsAsError=true
 
+      - name: Test examples
+        shell: pwsh
+        run: .\examples\Run-ExampleTests.ps1
+
       - name: Enforce PR approval policy
         if: github.event_name != 'push'
         uses: actions/github-script@v7

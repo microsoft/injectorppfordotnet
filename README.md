@@ -129,7 +129,18 @@ When your tests live in a separate project and reference production code from an
    dotnet test .\tests\MyApp.Tests\MyApp.Tests.csproj -p:InjectorPPTestMode=true
    ```
 
+If you are faking a method from an **external package**, run the test process with the JIT-related environment variables as well:
+
+```powershell
+$env:DOTNET_ReadyToRun = "0"
+$env:DOTNET_TieredCompilation = "0"
+$env:DOTNET_JitNoInline = "1"
+dotnet test .\tests\MyApp.Tests\MyApp.Tests.csproj -p:InjectorPPTestMode=true
+```
+
 This keeps normal production builds unchanged while letting your test run build the production project in a mode that works with InjectorPP.Net.
+
+For a complete Google API example, see [`examples\GoogleApisExternalPackageDemo`](examples/GoogleApisExternalPackageDemo).
 
 ## Use Cases
 
