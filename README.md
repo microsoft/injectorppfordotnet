@@ -6,11 +6,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%209.0-blue)](https://dotnet.microsoft.com/)
 
-**Stop writing interfaces just to make your code testable.** InjectorPP.Net is a runtime method replacement library for C# that lets you unit test any code — without changing it.
+**Make legacy C# code testable before you refactor it.** InjectorPP.Net is a runtime method replacement library for C# that helps you put tests around code that is not unit testable yet — without changing production code first.
 
 ## The Problem
 
-In the C# world, the conventional path to testability looks like this:
+In many legacy C# systems, the code you need to change is already in production, but it depends on static calls, framework APIs, OS integrations, or tightly coupled collaborators. A longer-term cleanup often looks like this:
 
 ```csharp
 // Step 1: You have simple, working production code
@@ -28,7 +28,7 @@ public class OrderService
 ```
 
 ```csharp
-// Step 2: To "make it testable", you add interfaces, constructors, and wiring
+// Step 2: A later refactoring might introduce interfaces, constructors, and wiring
 public interface ICertValidator { bool VerifyCertInMachine(); }
 public interface IPaymentGateway { void Charge(decimal amount); }
 
@@ -54,17 +54,17 @@ public class OrderService
 }
 ```
 
-What started as 10 lines became 20+. Multiply this across hundreds of classes and you get:
-- **Interfaces that exist only for testing** — never implemented more than once
-- **Constructor bloat** — services with 5, 10, 15 injected dependencies
-- **DI container complexity** — wiring, registration, lifetime management
-- **Indirection everywhere** — harder to read, navigate, and debug
+That refactoring may still be worth doing. But across hundreds of classes, it can mean:
+- **New seams to introduce everywhere** — interfaces, wrappers, adapters, and registrations
+- **Constructor and container churn** — more dependencies, more wiring, more files changing at once
+- **A large refactor before you have a safety net** — structure and behavior change together
+- **More risk in legacy areas** — harder to tell whether a failure comes from the cleanup or the original code
 
-The production code got *worse* to support the tests. That's backwards.
+On legacy systems, teams often need tests first. Once current behavior is covered, you can refactor toward cleaner dependency injection and interface-based design with confidence.
 
 ## The Solution
 
-InjectorPP.Net takes a completely different approach. Instead of restructuring your code around dependency injection, it **replaces method behavior at runtime** — so your production code stays exactly as it was:
+InjectorPP.Net is designed for that first step. It **replaces method behavior at runtime** so you can get tests around hard-to-isolate code while your production code stays exactly as it is today:
 
 ```csharp
 // Test code: just fake the dependencies and test ProcessOrder directly
@@ -84,7 +84,9 @@ public void ProcessOrder_WhenCertIsValid_ShouldSucceed()
 }
 ```
 
-**No interfaces. No constructor injection. No DI container. No code changes.**
+**No production-code changes required to get the first safety net in place.**
+
+If your codebase already uses dependency injection and narrow interfaces well, keep doing that. InjectorPP.Net is for the places where legacy code is not unit testable yet, not a replacement for good design.
 
 ## Installation
 
@@ -455,14 +457,14 @@ Assert.Throws<ObjectDisposedException>(() =>
 
 ## Real-World Example
 
-Here's the scenario InjectorPP.Net was built for. Your production code calls an OS-level API that's impossible to mock with interfaces:
+Here's the kind of legacy code InjectorPP.Net was built for. Your production code calls an OS-level API that is hard to isolate in its current form:
 
 ```csharp
 public class OrderService
 {
     public bool ProcessOrder(Order order)
     {
-        // Calls a static method that talks to the OS certificate store — can't be faked with DI
+        // Calls a static method that talks to the OS certificate store — hard to isolate in this design
         bool isValid = CertValidator.VerifyCertInMachine();
         if (!isValid) return false;
 
@@ -472,7 +474,7 @@ public class OrderService
 }
 ```
 
-With InjectorPP.Net, you test both paths by faking the dependencies — without touching the production code:
+With InjectorPP.Net, you can test both paths by faking the dependencies first — without touching the production code:
 
 ```csharp
 [Fact]
@@ -500,7 +502,7 @@ public void ProcessOrder_WhenCertIsInvalid_ShouldFail()
 }
 ```
 
-**Zero interfaces. Zero DI. Zero changes to production code. Full test coverage.**
+**Get tests in place first, then refactor toward cleaner seams later with confidence.**
 
 ## API Reference
 
