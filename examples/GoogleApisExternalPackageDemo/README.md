@@ -2,7 +2,13 @@
 
 This example shows how to use **InjectorPP.Net** to fake a method from an **external package** instead of from your own codebase.
 
-It uses `Google.Apis.Auth` and fakes:
+The scenario is a realistic **Google Workspace sign-in flow**:
+
+- production code receives a Google ID token from the application
+- production code calls `GoogleJsonWebSignature.ValidateAsync(...)`
+- production code only signs the user in when the email is verified and the hosted domain matches the company domain
+
+The example uses `Google.Apis.Auth` and fakes:
 
 ```csharp
 GoogleJsonWebSignature.ValidateAsync(...)
@@ -10,8 +16,8 @@ GoogleJsonWebSignature.ValidateAsync(...)
 
 ## Structure
 
-- `Demo.GoogleProduct` contains production code that directly calls the Google API package.
-- `Demo.GoogleProduct.Tests` contains the InjectorPP.Net test that replaces the Google API method at runtime.
+- `Demo.GoogleProduct` contains a `GoogleWorkspaceSignInService` that validates Google ID tokens for a company domain.
+- `Demo.GoogleProduct.Tests` contains InjectorPP.Net tests that replace the Google API method at runtime.
 
 ## Product Project Setup
 
@@ -51,10 +57,15 @@ dotnet test .\Demo.GoogleProduct.Tests\Demo.GoogleProduct.Tests.csproj --configu
 The production code calls the external package directly:
 
 ```csharp
-await GoogleJsonWebSignature.ValidateAsync(jwt, new GoogleJsonWebSignature.ValidationSettings())
+await GoogleJsonWebSignature.ValidateAsync(
+    idToken,
+    new GoogleJsonWebSignature.ValidationSettings
+    {
+        HostedDomain = _expectedHostedDomain
+    })
 ```
 
-The test intercepts that external-package method and returns a fake payload instead:
+The tests intercept that external-package method and return fake Google payloads instead:
 
 ```csharp
 injector.WhenCalled(
@@ -67,6 +78,9 @@ injector.WhenCalled(
             })!)
     .WillReturn(Task.FromResult(new GoogleJsonWebSignature.Payload
     {
-        Email = "fake-user@example.com"
+        Email = "ada@contoso.com",
+        EmailVerified = true,
+        Name = "Ada Lovelace",
+        HostedDomain = "contoso.com"
     }));
 ```
