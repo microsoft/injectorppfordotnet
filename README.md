@@ -131,6 +131,8 @@ When your tests live in a separate project and reference production code from an
 
 This keeps normal production builds unchanged while letting your test run build the production project in a mode that works with InjectorPP.Net.
 
+For a complete working example against an external package, see [`examples\GoogleApisExternalPackageDemo`](examples/GoogleApisExternalPackageDemo).
+
 ## Use Cases
 
 - [Fake Return Values](#fake-return-values)
