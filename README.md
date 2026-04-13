@@ -96,6 +96,41 @@ dotnet add package InjectorPP.Net
 
 **Requirements:** .NET 8.0+ | Windows or Linux | x64, ARM64, or x86
 
+## Setting Up a Test Project
+
+When your tests live in a separate project and reference production code from another `.csproj`, set up the solution so the production project builds in a test-specific mode only when your tests run.
+
+1. Add InjectorPP.Net to the **test project**:
+
+   ```
+   dotnet add .\tests\MyApp.Tests\MyApp.Tests.csproj package InjectorPP.Net
+   ```
+
+2. Reference the **production project** from the test project:
+
+   ```xml
+   <ItemGroup>
+     <ProjectReference Include="..\..\src\MyApp\MyApp.csproj" />
+   </ItemGroup>
+   ```
+
+3. In the **production project**, add a conditional MSBuild property group that is enabled only for test runs:
+
+   ```xml
+   <PropertyGroup Condition="'$(InjectorPPTestMode)' == 'true'">
+     <Optimize>false</Optimize>
+     <TieredCompilation>false</TieredCompilation>
+   </PropertyGroup>
+   ```
+
+4. Run the test project with that MSBuild property (macro) enabled:
+
+   ```
+   dotnet test .\tests\MyApp.Tests\MyApp.Tests.csproj -p:InjectorPPTestMode=true
+   ```
+
+This keeps normal production builds unchanged while letting your test run build the production project in a mode that works with InjectorPP.Net.
+
 ## Use Cases
 
 - [Fake Return Values](#fake-return-values)
