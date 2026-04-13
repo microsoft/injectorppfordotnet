@@ -8,6 +8,7 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <TieredCompilation>false</TieredCompilation>
+    <Optimize>false</Optimize>
   </PropertyGroup>
 
   <ItemGroup>
